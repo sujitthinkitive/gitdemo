@@ -1,0 +1,312 @@
+const { test, expect } = require('@playwright/test');
+
+test.describe('Staff Creation - Mandatory Fields', () => {
+  test('Create Practice Owner user and complete setup', async ({ page, context }) => {
+    // Test data
+    const testData = {
+      adminEmail: 'bhavna.adhav+13@thinkitive.com',
+      adminPassword: 'Pass@123',
+      firstName: 'Michael',
+      lastName: 'Anderson',
+      role: 'Practice Owner',
+      email: 'MichaelAnderson@mailinator.com',
+      phoneNumber: '7025678901',
+      newPassword: 'Welcome@123',
+      baseUrl: 'https://qa.practiceeasily.com',
+      mailinatorUrl: 'https://www.mailinator.com'
+    };
+
+    // Step 1: Navigate to login page
+    await page.goto(`${testData.baseUrl}/auth/login`);
+    
+    // Step 2: Login as admin
+    await page.getByRole('textbox', { name: 'Enter Your Email ID / Phone' }).fill(testData.adminEmail);
+    await page.getByRole('textbox', { name: 'Enter Password' }).fill(testData.adminPassword);
+    await page.getByRole('button', { name: 'Login' }).click();
+    
+    // Wait for successful login
+    await page.waitForURL(/\/admin\/settings-tabs\/profile-tabs\/profile/);
+    
+    // Step 3: Navigate to Users tab
+    await page.getByRole('tab', { name: 'Users' }).click();
+    await page.waitForURL(/\/admin\/settings-tabs\/profile-tabs\/user/);
+    
+    // Step 4: Click Add User button
+    await page.getByRole('button', { name: 'Add User' }).click();
+    
+    // Wait for the Add User modal to appear
+    await page.waitForSelector('text=Add User');
+    
+    // Step 5: Fill in user details
+    // Select role
+    await page.getByRole('combobox', { name: 'Select Role' }).click();
+    await page.getByRole('option', { name: 'Practice Owner' }).click();
+    
+    // Close dropdown by pressing Escape
+    await page.keyboard.press('Escape');
+    
+    // Fill in mandatory fields
+    await page.getByRole('textbox', { name: 'Enter First Name' }).fill(testData.firstName);
+    await page.getByRole('textbox', { name: 'Enter Last Name' }).fill(testData.lastName);
+    await page.getByRole('textbox', { name: 'Enter Email ID' }).fill(testData.email);
+    
+    // Handle phone number field
+    await page.locator('input[type="tel"]').click();
+    await page.locator('input[type="tel"]').fill('');
+    await page.locator('input[type="tel"]').fill(testData.phoneNumber);
+    
+    // Click outside to validate
+    await page.getByRole('textbox', { name: 'Enter Email ID' }).click();
+    
+    // Step 6: Save the user
+    await page.getByRole('button', { name: 'Save' }).click();
+    
+    // Wait for success message
+    await page.waitForSelector('text=Clinician added successfully');
+    
+    // Verify user appears in the list
+    await expect(page.getByRole('cell', { name: `${testData.firstName} ${testData.lastName}` })).toBeVisible();
+    await expect(page.getByRole('cell', { name: testData.email })).toBeVisible();
+    
+    // Step 7: Open new tab for Mailinator
+    const mailinatorPage = await context.newPage();
+    await mailinatorPage.goto(testData.mailinatorUrl);
+    
+    // Step 8: Check email inbox
+    await mailinatorPage.getByRole('textbox', { name: 'Enter public inbox' }).fill(testData.firstName + testData.lastName);
+    await mailinatorPage.getByRole('button', { name: 'GO' }).click();
+    
+    // Wait for inbox to load
+    await mailinatorPage.waitForURL(/\/v4\/public\/inboxes\.jsp\?to=/);
+    
+    // Wait for email to arrive (with retry logic)
+    let emailFound = false;
+    for (let i = 0; i < 10; i++) {
+      const emailRow = mailinatorPage.getByRole('row', { name: /You're invited to Practice Easily platform/ });
+      if (await emailRow.isVisible()) {
+        emailFound = true;
+        break;
+      }
+      await mailinatorPage.waitForTimeout(3000);
+      await mailinatorPage.reload();
+    }
+    
+    expect(emailFound).toBeTruthy();
+    
+    // Step 9: Open the email
+    await mailinatorPage.getByRole('row', { name: /You're invited to Practice Easily platform/ }).click();
+    
+    // Wait for email content to load
+    await mailinatorPage.waitForSelector('iframe[name="html_msg_body"]');
+    
+    // Step 10: Extract OTP from email
+    const emailFrame = mailinatorPage.frameLocator('iframe[name="html_msg_body"]');
+    const otpText = await emailFrame.locator('div:has-text("605925")').first().textContent();
+    const otp = otpText.replace(/['"]/g, '').trim();
+    
+    // Step 11: Click Complete Setup button
+    await emailFrame.getByRole('link', { name: 'Complete Setup' }).click();
+    
+    // Wait for new tab to open
+    const [newPage] = await Promise.all([
+      context.waitForEvent('page'),
+      // The action that triggers the new tab
+    ]);
+    
+    // Step 12: Enter OTP
+    await newPage.waitForURL(/\/auth\/enter-otp/);
+    
+    // Enter OTP digits one by one
+    const otpDigits = otp.split('');
+    for (let i = 0; i < otpDigits.length; i++) {
+      await newPage.locator(`input[id=":r${i + 2}:"]`).fill(otpDigits[i]);
+    }
+    
+    // Step 13: Verify OTP
+    await newPage.getByRole('button', { name: 'Verify OTP' }).click();
+    
+    // Wait for password setup page
+    await newPage.waitForURL(/\/auth\/set-password/);
+    await newPage.waitForSelector('text=OTP Verified Successfully');
+    
+    // Step 14: Set new password
+    await newPage.getByRole('textbox', { name: 'Enter New Password' }).fill(testData.newPassword);
+    await newPage.getByRole('textbox', { name: 'Confirm Password' }).fill(testData.newPassword);
+    
+    // Verify password strength indicators
+    await expect(newPage.locator('text=At least 8 characters')).toBeVisible();
+    await expect(newPage.locator('text=Password Strength : Strong')).toBeVisible();
+    
+    // Step 15: Save password
+    await newPage.getByRole('button', { name: 'Set Password' }).click();
+    
+    // Wait for success and redirect to login
+    await newPage.waitForURL(/\/auth\/login/);
+    await newPage.waitForSelector('text=Password Set Successfully');
+    
+    // Step 16: Login with new user credentials
+    await newPage.getByRole('textbox', { name: 'Enter Your Email ID / Phone' }).fill(testData.email);
+    await newPage.getByRole('textbox', { name: 'Enter Password' }).fill(testData.newPassword);
+    await newPage.getByRole('button', { name: 'Login' }).click();
+    
+    // Step 17: Verify successful login
+    await newPage.waitForURL(/\/admin\/settings-tabs\/profile-tabs\/profile/);
+    await newPage.waitForSelector('text=Login successful');
+    
+    // Verify user name is displayed
+    await expect(newPage.locator(`text=${testData.firstName} ${testData.lastName}`)).toBeVisible();
+    
+    // Close extra pages
+    await mailinatorPage.close();
+  });
+});
+
+// Alternative version with more robust error handling and utilities
+test.describe('Staff Creation with Enhanced Error Handling', () => {
+  // Utility function to generate random data
+  function generateRandomUserData() {
+    const randomNum = Math.floor(Math.random() * 10000);
+    const firstNames = ['John', 'Emma', 'Michael', 'Sarah', 'David', 'Lisa'];
+    const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Davis'];
+    
+    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+    
+    return {
+      firstName: firstName + randomNum,
+      lastName: lastName,
+      email: `${firstName}${lastName}${randomNum}@mailinator.com`,
+      phoneNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString()
+    };
+  }
+  
+  test('Create user with random data and complete setup', async ({ page, context }) => {
+    // Generate random user data
+    const userData = generateRandomUserData();
+    
+    const config = {
+      adminEmail: 'bhavna.adhav+13@thinkitive.com',
+      adminPassword: 'Pass@123',
+      role: 'Practice Owner',
+      newPassword: 'Welcome@123',
+      baseUrl: 'https://qa.practiceeasily.com',
+      mailinatorUrl: 'https://www.mailinator.com',
+      maxRetries: 10,
+      retryDelay: 3000
+    };
+    
+    try {
+      // Login as admin
+      await page.goto(`${config.baseUrl}/auth/login`);
+      await page.getByRole('textbox', { name: 'Enter Your Email ID / Phone' }).fill(config.adminEmail);
+      await page.getByRole('textbox', { name: 'Enter Password' }).fill(config.adminPassword);
+      await page.getByRole('button', { name: 'Login' }).click();
+      await page.waitForURL(/\/admin\/settings-tabs\/profile-tabs\/profile/, { timeout: 10000 });
+      
+      // Navigate to Users
+      await page.getByRole('tab', { name: 'Users' }).click();
+      await page.waitForURL(/\/admin\/settings-tabs\/profile-tabs\/user/);
+      
+      // Add new user
+      await page.getByRole('button', { name: 'Add User' }).click();
+      await page.waitForSelector('text=Add User', { timeout: 5000 });
+      
+      // Fill user form
+      await page.getByRole('combobox', { name: 'Select Role' }).click();
+      await page.getByRole('option', { name: config.role }).click();
+      await page.keyboard.press('Escape');
+      
+      await page.getByRole('textbox', { name: 'Enter First Name' }).fill(userData.firstName);
+      await page.getByRole('textbox', { name: 'Enter Last Name' }).fill(userData.lastName);
+      await page.getByRole('textbox', { name: 'Enter Email ID' }).fill(userData.email);
+      
+      // Phone number with retry logic
+      const phoneInput = page.locator('input[type="tel"]');
+      await phoneInput.click();
+      await phoneInput.fill('');
+      await phoneInput.type(userData.phoneNumber.substring(0, 10), { delay: 50 });
+      
+      // Save user
+      await page.getByRole('button', { name: 'Save' }).click();
+      await page.waitForSelector('text=Clinician added successfully', { timeout: 10000 });
+      
+      // Open Mailinator
+      const mailinatorPage = await context.newPage();
+      await mailinatorPage.goto(config.mailinatorUrl);
+      
+      // Check inbox
+      const inboxName = userData.email.split('@')[0];
+      await mailinatorPage.getByRole('textbox', { name: 'Enter public inbox' }).fill(inboxName);
+      await mailinatorPage.getByRole('button', { name: 'GO' }).click();
+      
+      // Wait for email with retries
+      let emailFound = false;
+      for (let i = 0; i < config.maxRetries; i++) {
+        if (await mailinatorPage.getByRole('row', { name: /You're invited to Practice Easily platform/ }).isVisible()) {
+          emailFound = true;
+          break;
+        }
+        await mailinatorPage.waitForTimeout(config.retryDelay);
+        await mailinatorPage.reload();
+      }
+      
+      if (!emailFound) {
+        throw new Error('Invitation email not received within timeout period');
+      }
+      
+      // Open email
+      await mailinatorPage.getByRole('row', { name: /You're invited to Practice Easily platform/ }).click();
+      await mailinatorPage.waitForSelector('iframe[name="html_msg_body"]');
+      
+      // Extract OTP
+      const emailFrame = mailinatorPage.frameLocator('iframe[name="html_msg_body"]');
+      const otpElement = await emailFrame.locator('div').filter({ hasText: /^\d{6}$/ }).first();
+      const otp = await otpElement.textContent();
+      
+      console.log(`Extracted OTP: ${otp}`);
+      
+      // Click setup link
+      const [setupPage] = await Promise.all([
+        context.waitForEvent('page'),
+        emailFrame.getByRole('link', { name: 'Complete Setup' }).click()
+      ]);
+      
+      // Enter OTP
+      await setupPage.waitForURL(/\/auth\/enter-otp/);
+      const otpDigits = otp.trim().split('');
+      
+      for (let i = 0; i < otpDigits.length; i++) {
+        const selector = `input:nth-of-type(${i + 1})`;
+        await setupPage.locator(selector).fill(otpDigits[i]);
+      }
+      
+      // Verify OTP
+      await setupPage.getByRole('button', { name: 'Verify OTP' }).click();
+      await setupPage.waitForURL(/\/auth\/set-password/);
+      
+      // Set password
+      await setupPage.getByRole('textbox', { name: 'Enter New Password' }).fill(config.newPassword);
+      await setupPage.getByRole('textbox', { name: 'Confirm Password' }).fill(config.newPassword);
+      await setupPage.getByRole('button', { name: 'Set Password' }).click();
+      
+      // Login with new credentials
+      await setupPage.waitForURL(/\/auth\/login/);
+      await setupPage.getByRole('textbox', { name: 'Enter Your Email ID / Phone' }).fill(userData.email);
+      await setupPage.getByRole('textbox', { name: 'Enter Password' }).fill(config.newPassword);
+      await setupPage.getByRole('button', { name: 'Login' }).click();
+      
+      // Verify login success
+      await setupPage.waitForURL(/\/admin\/settings-tabs\/profile-tabs\/profile/);
+      await expect(setupPage.locator(`text=${userData.firstName} ${userData.lastName}`)).toBeVisible();
+      
+      console.log(`Test completed successfully for user: ${userData.email}`);
+      
+      // Cleanup
+      await mailinatorPage.close();
+      
+    } catch (error) {
+      console.error('Test failed:', error);
+      throw error;
+    }
+  });
+});
