@@ -1,0 +1,22 @@
+{
+  "name": "gitdemo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sujitthinkitive/gitdemo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sujitthinkitive/gitdemo/issues"
+  },
+  "homepage": "https://github.com/sujitthinkitive/gitdemo#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.54.1",
+    "@types/node": "^24.1.0"
+  }
+}
